@@ -19,4 +19,7 @@ Pod::Spec.new do |s|
 
   s.swift_version = '5'
   s.requires_arc  = true
+
+  s.dependency 'XTILoger'
+  
 end
