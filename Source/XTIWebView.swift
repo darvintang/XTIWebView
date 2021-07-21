@@ -8,19 +8,19 @@ import UIKit
 import WebKit
 import XTILoger
 
+public typealias XTIWKDelegate = WKUIDelegate & WKNavigationDelegate
+
 let webLoger = XTILoger(logerName: "XTIWebView")
 
-@objc public protocol XTIWebViewDelegate: NSObjectProtocol {
+@objc public protocol XTIWebViewDelegate: XTIWKDelegate {
     @objc optional func titleChanged(_ title: String?)
     @objc optional func canGoBack(_ canGoBack: Bool)
 
     @objc optional func userContentController(_ message: WKScriptMessage)
-    @objc optional func synJSToNative(_ message: String) -> String?
 
+    @objc optional func synJSToNative(_ message: String) -> String?
     @objc optional func showAlert(_ message: String, completion: @escaping () -> Void)
     @objc optional func showConfirm(_ message: String, completion: @escaping (Bool) -> Void)
-
-    @objc optional func decidePolicy(_ navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void)
 }
 
 open class XTIWebView: UIView {
@@ -40,7 +40,11 @@ open class XTIWebView: UIView {
         return tempProgressView
     }()
 
-    weak var delegate: XTIWebViewDelegate?
+    weak var delegate: XTIWebViewDelegate? {
+        didSet {
+            self.webView.navigationDelegate = delegate
+        }
+    }
 
     override public init(frame: CGRect) {
         super.init(frame: frame)
@@ -76,7 +80,6 @@ open class XTIWebView: UIView {
         self.webView.addObserver(self, forKeyPath: "loading", options: [.new, .old], context: nil)
         self.webView.addObserver(self, forKeyPath: "estimatedProgress", options: .new, context: nil)
 
-        self.webView.navigationDelegate = self
         self.webView.uiDelegate = self
 
         self.webView.scrollView.showsVerticalScrollIndicator = false
@@ -105,16 +108,6 @@ open class XTIWebView: UIView {
             self.delegate?.titleChanged?(change?[.newKey] as? String)
         } else if keyPath == "canGoBack" {
             self.delegate?.canGoBack?((change?[.newKey] as? Bool) ?? false)
-        }
-    }
-}
-
-extension XTIWebView: WKNavigationDelegate {
-    public func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        if self.delegate?.responds(to: Selector("decidePolicy(_:decisionHandler:)")) ?? false {
-            self.delegate?.decidePolicy?(navigationAction, decisionHandler: decisionHandler)
-        } else {
-            decisionHandler(.allow)
         }
     }
 }
@@ -166,8 +159,21 @@ fileprivate extension XTIWebView {
     }
 }
 
-extension XTIWebView {
-    public func addJSToNative(_ scriptName: String) {
+public extension XTIWebView {
+    public final func load(_ url: String) {
+        if let tempUrl = URL(string: url) {
+            let request = URLRequest(url: tempUrl)
+            self.webView.load(request)
+        } else {
+            webLoger.warning("链接错误，链接：", url)
+        }
+    }
+
+    public final func reload() {
+        self.webView.reload()
+    }
+
+    public final func addJSToNative(_ scriptName: String) {
         self.configuration.userContentController.add(XTIScriptMessageHandler(self), name: scriptName)
     }
 
@@ -176,12 +182,13 @@ extension XTIWebView {
     ///   - funcName: 方法名，不需要()
     ///   - value: 参数，如果函数没有参数就不传递
     ///   - completion: 调用结果
-    public func nativeToJS(_ funcName: String, value: String? = nil, completion: ((Any?, Error?) -> Void)? = nil) {
+    public final func nativeToJS(_ funcName: String, value: String? = nil, completion: ((Any?, Error?) -> Void)? = nil) {
         webLoger.info("原生调用JS方法：", funcName, value)
         self.webView.evaluateJavaScript(funcName + (value == nil ? "()" : "('\(value!)')"), completionHandler: completion)
     }
 }
 
+/// 可重写部分
 public extension XTIWebView {
     /// 重写该方法可以拦截并处理JS调用原生的功能
     public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
